@@ -1,925 +1,1190 @@
-# SensAi - AI Career Coach
+# SensAI — Complete Project Documentation
 
-SensAi is an AI-powered career development platform built with Next.js. It helps professionals onboard with their career profile, view personalized industry insights, practice AI-generated technical interview quizzes, and prepare for future resume and cover-letter workflows.
+SensAI is an **AI-powered career development platform** that helps professionals grow through personalized industry insights, mock technical interviews, resume building, and AI-generated cover letters. Everything is personalized from a single **career profile** (industry, skills, experience, bio) collected during onboarding.
 
-This document explains the project at a low-level system design level so it can be used for interviews, walkthroughs, and revision.
+This document explains the project **end to end**: architecture, database design, feature flows, SSR/CSR patterns, Gemini AI integration, and how every feature connects to the others.
 
-## 1. Project Overview
+---
 
-SensAi solves a common career-growth problem: users need personalized guidance, market awareness, and practice material based on their own industry and skills. Instead of showing generic career advice, the app first collects the user's industry, specialization, experience, skills, and bio. That profile becomes the context for AI-generated insights and interview questions.
+## Table of Contents
 
-The current implemented product has these main areas:
+1. [What SensAI Does](#1-what-sensai-does)
+2. [Tech Stack](#2-tech-stack)
+3. [High-Level Architecture](#3-high-level-architecture)
+4. [Low-Level Architecture](#4-low-level-architecture)
+5. [Project Structure](#5-project-structure)
+6. [Database Architecture](#6-database-architecture)
+7. [Authentication & Authorization (Clerk)](#7-authentication--authorization-clerk)
+8. [Next.js: SSR vs CSR in This Project](#8-nextjs-ssr-vs-csr-in-this-project)
+9. [Gemini AI Integration](#9-gemini-ai-integration)
+10. [Inngest Background Jobs](#10-inngest-background-jobs)
+11. [Feature Walkthrough (Step by Step)](#11-feature-walkthrough-step-by-step)
+12. [Feature Interconnections](#12-feature-interconnections)
+13. [Sequence Diagrams](#13-sequence-diagrams)
+14. [Server Actions Reference](#14-server-actions-reference)
+15. [Styling & UI Components](#15-styling--ui-components)
+16. [Environment Variables & Local Setup](#16-environment-variables--local-setup)
+17. [End-to-End User Journey](#17-end-to-end-user-journey)
+18. [Security Model](#18-security-model)
+19. [Scalability & Design Decisions](#19-scalability--design-decisions)
 
-- Public landing page with product positioning, feature sections, FAQs, testimonials, and CTA buttons.
-- Clerk authentication for sign-in, sign-up, session handling, and user profile menu.
-- Automatic local user creation after authentication.
-- Onboarding flow that stores industry, specialization, experience, skills, and bio.
-- Industry insights dashboard with market outlook, growth rate, demand level, top skills, salary ranges, trends, and recommended skills.
-- AI-generated mock interview quiz based on the user's industry and skills.
-- Quiz result persistence through the `Assessment` table.
-- Inngest scheduled job scaffolding for weekly industry insight refreshes.
-- Resume and cover-letter database models with placeholder UI routes for future implementation.
+---
+
+## 1. What SensAI Does
+
+| Area | Route | What It Does |
+| --- | --- | --- |
+| Landing | `/` | Public marketing page — features, FAQs, testimonials, CTA |
+| Auth | `/sign-in`, `/sign-up` | Clerk-hosted authentication |
+| Onboarding | `/onboarding` | Collect industry, specialization, experience, skills, bio |
+| Dashboard | `/dashboard` | AI-generated industry insights — salary, trends, skills |
+| Interview Prep | `/interview` | Assessment history, stats, performance chart |
+| Mock Quiz | `/interview/mock` | 10 AI-generated MCQs with scoring and improvement tips |
+| Resume | `/resume` | Form-based resume builder with AI improvement and PDF export |
+| Cover Letters | `/ai-cover-letter` | List, create, and view AI-generated cover letters |
+
+**Core idea:** The user's profile is the **single source of truth** for all AI personalization. Every Gemini prompt includes industry, skills, experience, and bio where relevant.
+
+---
 
 ## 2. Tech Stack
 
-| Layer | Technology | Why It Is Used | Benefits |
-| --- | --- | --- | --- |
-| Frontend and backend framework | Next.js 16 App Router | Provides routing, server components, server actions, API routes, layouts, and image optimization in one framework. | Full-stack development in a single codebase, better performance with server rendering, simple route-based architecture. |
-| UI library | React 19 | Component-based UI rendering. | Reusable components, client-side interactivity, predictable state-driven rendering. |
-| Styling | Tailwind CSS 4 | Utility-first styling across the app. | Fast UI development, consistent design tokens, responsive styling without large custom CSS files. |
-| Component primitives | Radix UI and shadcn-style components | Used for accessible UI controls such as dialogs, dropdowns, selects, tabs, accordions, radio groups, progress bars, and cards. | Accessibility, keyboard support, consistent UI composition. |
-| Icons | Lucide React | Icon set used across navigation, feature cards, dashboard cards, and buttons. | Lightweight, consistent visual language. |
-| Authentication | Clerk | Handles sign-in, sign-up, session state, and user menu. | Avoids building auth from scratch, secure session management, simple Next.js integration. |
-| Database ORM | Prisma | Type-safe database modeling and queries. | Clear schema, migrations, relations, safer query API. |
-| Database | PostgreSQL | Stores users, industry insights, assessments, resumes, and cover letters. | Relational integrity, arrays, JSON fields, indexing, production-ready persistence. |
-| AI provider | Google Gemini via `@google/generative-ai` | Generates industry insights, quiz questions, and improvement tips. | Personalized content generation from user context. |
-| Background jobs | Inngest | Runs scheduled jobs, currently for weekly industry insight regeneration. | Reliable asynchronous workflows, cron scheduling, step-level observability. |
-| Forms | React Hook Form and Zod | Handles onboarding form state and validation. | Fast forms, schema-based validation, transformed values before saving. |
-| Charts | Recharts | Renders salary range visualization in the dashboard. | Declarative chart components with responsive layouts. |
-| Notifications | Sonner | Shows success and error toasts. | Immediate user feedback for async operations. |
-| Dates | date-fns | Formats dashboard dates and relative update times. | Small, readable date utilities. |
-| Theming | next-themes | Applies dark/light theme support. | Simple class-based theme switching and system preference support. |
+| Layer | Technology | Role in SensAI |
+| --- | --- | --- |
+| **Full-stack framework** | Next.js 16 (App Router) | Routing, SSR, Server Components, Server Actions, API routes |
+| **UI library** | React 19 | Component rendering, client interactivity |
+| **Authentication** | Clerk (`@clerk/nextjs`) | Sign-in, sign-up, sessions, user menu |
+| **Database** | Neon PostgreSQL | Centralized cloud Postgres (serverless) |
+| **ORM** | Prisma 6 | Schema, migrations, type-safe queries |
+| **AI** | Google Gemini (`@google/generative-ai`) | Industry insights, quizzes, tips, resume & cover letter text |
+| **Background jobs** | Inngest | Weekly cron to refresh industry insights |
+| **Styling** | Tailwind CSS 3 | Utility-first CSS, responsive design |
+| **UI primitives** | Radix UI | Accessible dialogs, dropdowns, selects, tabs, etc. |
+| **Component library** | shadcn/ui pattern | Pre-built components in `components/ui/` |
+| **Forms** | React Hook Form + Zod | Validation and schema transforms |
+| **Charts** | Recharts | Salary bar chart, quiz performance line chart |
+| **Toasts** | Sonner | Success/error feedback |
+| **Theming** | next-themes | Dark mode (forced dark in root layout) |
+| **Markdown** | `@uiw/react-md-editor`, `react-markdown` | Resume editing and preview |
+| **PDF export** | html2pdf.js | Download resume as PDF |
+
+---
 
 ## 3. High-Level Architecture
 
 ```text
-Browser
-  |
-  | Next.js pages, layouts, client components
-  v
-Next.js App Router
-  |
-  | Server Components call Server Actions
-  | Client Components call Server Actions through hooks
-  v
-Server Actions
-  |
-  | auth() / currentUser()
-  v
-Clerk Authentication
-  |
-  | authenticated user id
-  v
-Prisma ORM
-  |
-  v
-PostgreSQL Database
-
-AI flows:
-Server Actions / Inngest Jobs
-  |
-  v
-Google Gemini API
-  |
-  v
-Parsed JSON / text
-  |
-  v
-Prisma persistence and dashboard UI
+┌─────────────────────────────────────────────────────────────────┐
+│                         BROWSER (Client)                        │
+│  Landing │ Dashboard │ Quiz │ Resume │ Cover Letter │ Auth UI   │
+│         (React Client Components + Server-rendered HTML)        │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ HTTP / Server Actions
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    NEXT.JS APP ROUTER (Server)                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │ Server       │  │ Server       │  │ API Route            │  │
+│  │ Components   │  │ Actions      │  │ /api/inngest         │  │
+│  │ (SSR pages)  │  │ (business    │  │ (Inngest handler)    │  │
+│  │              │  │  logic)      │  │                      │  │
+│  └──────────────┘  └──────┬───────┘  └──────────┬───────────┘  │
+│                           │                      │              │
+│  ┌────────────────────────┴──────────────────────┴───────────┐  │
+│  │                    middleware.js (Clerk)                   │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└────────────┬───────────────────────────────┬────────────────────┘
+             │                               │
+             ▼                               ▼
+┌────────────────────────┐     ┌────────────────────────────────┐
+│   CLERK (Identity)     │     │   GOOGLE GEMINI API            │
+│   Sessions, JWT, users   │     │   Content generation           │
+└────────────────────────┘     └────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────┐     ┌────────────────────────────────┐
+│   PRISMA ORM           │────▶│   NEON POSTGRESQL              │
+│   Type-safe queries    │     │   Users, Insights, Assessments │
+└────────────────────────┘     └────────────────────────────────┘
+                                         ▲
+                                         │
+                               ┌─────────┴──────────┐
+                               │   INNGEST (Cron)   │
+                               │   Weekly refresh   │
+                               └────────────────────┘
 ```
 
-The architecture is intentionally full-stack Next.js. Pages, layouts, API routes, server actions, and UI components live in one repository. Server actions are the business logic layer. Prisma is the data access layer. Clerk is the identity layer. Gemini is the AI generation layer. Inngest is the scheduled background-processing layer.
+### Layer Responsibilities
 
-## 4. Folder Structure
+| Layer | Responsibility |
+| --- | --- |
+| **Clerk** | Who is the user? (identity, session) |
+| **Middleware** | Block unauthenticated access to protected routes |
+| **Server Actions** | Business logic, auth checks, DB + AI calls |
+| **Prisma + Neon** | Persistent storage with relational integrity |
+| **Gemini** | Generate insights, questions, tips, resume/cover letter text |
+| **Inngest** | Scheduled background refresh without blocking users |
+| **Client Components** | Forms, quizzes, charts, interactive UI |
+
+---
+
+## 4. Low-Level Architecture
+
+### 4.1 Request Flow (Protected Page)
 
 ```text
-app/
-  page.jsx                         Public landing page
-  layout.js                        Root layout, Clerk provider, theme provider, header, footer
-  globals.css                      Tailwind theme variables and custom styles
-  (auth)/                          Clerk sign-in/sign-up route group
-  (main)/                          Authenticated application route group
-    dashboard/                     Industry insights dashboard
-    onboarding/                    Profile completion flow
-    interview/                     Interview prep and mock quiz flow
-    ai-cover-letter/               Placeholder cover-letter routes
-  api/inngest/route.js             Inngest API handler
-  data/                            Static landing-page and onboarding data
-
-actions/
-  user.js                          Onboarding and user status server actions
-  dashboard.js                     Industry insight AI generation and fetch actions
-  interview.js                     Quiz generation and assessment persistence actions
-
-components/
-  header.jsx                       Main navigation and auth-aware menu
-  hero.jsx                         Landing-page hero
-  ui/                              Reusable shadcn/Radix UI components
-
-hooks/
-  use-fetch.js                     Client-side async wrapper for server actions
-
-lib/
-  prisma.js                        Prisma client singleton
-  checkUser.js                     Clerk-to-database user synchronization
-  inngest/                         Inngest client and background functions
-  utils.ts                         Tailwind class merge helper
-
-prisma/
-  schema.prisma                    Database schema
-  migrations/                      SQL migrations
+1. Browser requests /dashboard
+2. middleware.js → clerkMiddleware checks session
+3. If no userId → redirectToSignIn()
+4. dashboard/page.jsx (Server Component) runs on server:
+     a. getUserOnboardingStatus() → auth() + Prisma
+     b. if !isOnboarded → redirect("/onboarding")
+     c. getIndustryInsights() → Prisma (+ Gemini if missing)
+     d. Renders DashboardView with insights prop
+5. HTML sent to browser; client hydrates interactive parts
 ```
 
-## 5. Routing and Layout Design
-
-The app uses the Next.js App Router.
-
-### Root Layout
-
-File: `app/layout.js`
-
-The root layout wraps the entire application with:
-
-- `ClerkProvider` for authentication.
-- `ThemeProvider` from `next-themes` for dark mode.
-- Global `Header`.
-- Main content wrapper.
-- `Toaster` for app-wide toast notifications.
-- Footer.
-
-Because the `Header` is rendered globally, every route gets the same navigation and user-state handling.
-
-### Public Route
-
-File: `app/page.jsx`
-
-The landing page is publicly accessible. It renders:
-
-- `HeroSection`
-- Feature cards from `app/data/features.js`
-- Static platform metrics
-- How-it-works steps from `app/data/howItWorks.js`
-- Testimonials from `app/data/testimonial.js`
-- FAQs from `app/data/faqs.js`
-- CTA linking to `/dashboard`
-
-### Auth Routes
-
-Files:
-
-- `app/(auth)/sign-in/[[...sign-in]]/page.jsx`
-- `app/(auth)/sign-up/[[...sign-up]]/page.jsx`
-- `app/(auth)/layout.js`
-
-These routes render Clerk's hosted UI components inside a centered auth layout.
-
-### Main App Routes
-
-Files under `app/(main)/` are the authenticated product area:
-
-- `/onboarding` collects user career profile.
-- `/dashboard` displays industry insights.
-- `/interview` is the interview-prep landing route, currently a placeholder.
-- `/interview/mock` contains the implemented mock quiz flow.
-- `/ai-cover-letter` and `/ai-cover-letter/[id]` are currently placeholder routes.
-
-## 6. Authentication and User Synchronization
-
-Authentication is handled by Clerk.
-
-The important bridge between Clerk and the application database is:
+### 4.2 Server Action Flow (Client-Initiated)
 
 ```text
-components/header.jsx
-  -> checkUser()
-    -> currentUser() from Clerk
-    -> db.user.findUnique({ clerkUserId })
-    -> create User if missing
+1. Client Component calls server action (e.g. generateQuiz)
+2. Next.js POSTs to server with action ID
+3. Server action runs:
+     a. auth() from Clerk → userId
+     b. db.user.findUnique({ clerkUserId: userId })
+     c. model.generateContent(prompt) → Gemini
+     d. Parse JSON, persist if needed
+     e. Return result to client
+4. useFetch hook updates loading/data/error state
+5. Sonner toast on error; UI re-renders with new data
+```
+
+### 4.3 User Sync Bridge (Clerk → Database)
+
+Clerk owns authentication; PostgreSQL owns application data. They are linked by `User.clerkUserId`.
+
+```text
+Every page load (Header Server Component):
+  checkUser()
+    → currentUser() from Clerk
+    → db.user.findUnique({ clerkUserId })
+    → if missing: db.user.create({ clerkUserId, email, name, imageUrl })
+    → return User row
 ```
 
 File: `lib/checkUser.js`
 
-When a signed-in Clerk user visits the app, `checkUser()`:
+### 4.4 AI Response Pipeline
 
-1. Reads the current Clerk user using `currentUser()`.
-2. Returns `null` if nobody is signed in.
-3. Looks for an existing `User` row using `clerkUserId`.
-4. If found, returns the existing database user.
-5. If missing, creates a new user with:
-   - `clerkUserId`
-   - `name`
-   - `imageUrl`
-   - `email`
-
-This is important because Clerk owns authentication, while PostgreSQL owns application-specific profile data such as industry, skills, assessments, resumes, and cover letters.
-
-## 7. Database Design
-
-File: `prisma/schema.prisma`
-
-The database has five main models.
-
-### User
-
-Stores the application profile linked to Clerk.
-
-Important fields:
-
-- `clerkUserId`: unique Clerk identity.
-- `email`: unique user email.
-- `name`, `imageUrl`: copied from Clerk.
-- `industry`: selected during onboarding.
-- `bio`, `experience`, `skills`: career profile.
-- Relations:
-  - one user has many assessments.
-  - one user has many cover letters.
-  - one user has one resume.
-  - one user belongs to one industry insight through `industry`.
-
-### IndustryInsight
-
-Stores AI-generated market data for an industry.
-
-Important fields:
-
-- `industry`: unique identifier such as `tech-software-development`.
-- `salaryRanges`: JSON array of salary objects.
-- `growthRate`: percentage growth.
-- `demandLevel`: enum: `HIGH`, `MEDIUM`, `LOW`.
-- `marketOutlook`: enum: `POSITIVE`, `NEUTRAL`, `NEGATIVE`.
-- `topSkills`, `keyTrends`, `recommendedSkills`: string arrays.
-- `lastUpdated`, `nextUpdate`: refresh metadata.
-
-This table is shared across users. If many users select the same industry, they can reuse the same generated insight record.
-
-### Assessment
-
-Stores completed interview quiz results.
-
-Important fields:
-
-- `userId`: owner.
-- `quizScore`: percentage score.
-- `questions`: JSON array containing question, correct answer, user answer, correctness, and explanation.
-- `category`: currently `"Technical"`.
-- `improvementTip`: optional Gemini-generated feedback.
-
-### Resume
-
-Stores one resume per user.
-
-Important fields:
-
-- `userId`: unique, enforcing one resume per user.
-- `content`: resume content.
-
-The schema exists, but the UI and server actions for resume generation are not implemented yet.
-
-### CoverLetter
-
-Stores generated cover letters.
-
-Important fields:
-
-- `userId`
-- `content`
-- `jobDescription`
-- `companyName`
-- `jobTitle`
-
-The schema exists, but cover-letter UI and generation logic are currently placeholders.
-
-## 8. Low-Level Feature Design
-
-### 8.1 Landing Page
-
-Files:
-
-- `app/page.jsx`
-- `components/hero.jsx`
-- `app/data/features.js`
-- `app/data/howItWorks.js`
-- `app/data/faqs.js`
-- `app/data/testimonial.js`
-
-Implementation:
-
-- The landing page is a server component.
-- Reusable static content is stored in data files.
-- Feature cards and FAQ accordions are rendered by mapping over arrays.
-- The hero section is a client component because it uses `useRef` and `useEffect` to animate the hero image on scroll.
-- `next/image` is used for optimized images.
-
-Connection to rest of app:
-
-- CTA buttons link to `/dashboard`.
-- If a user is signed in and onboarded, dashboard data is shown.
-- If a user is not onboarded, the dashboard page redirects to onboarding.
-- If a user is signed out, Clerk sign-in flow is available through the header.
-
-### 8.2 Header and Navigation
-
-File: `components/header.jsx`
-
-Implementation:
-
-- Server component that calls `checkUser()`.
-- Uses Clerk components:
-  - `SignedIn`
-  - `SignedOut`
-  - `SignInButton`
-  - `UserButton`
-- Shows `Industry Insights` button for signed-in users.
-- Shows `Growth Tools` dropdown with links for resume, cover letter, and interview prep.
-
-Connection to rest of app:
-
-- The header is mounted in the root layout, so user synchronization happens whenever the app shell renders.
-- Navigation exposes the main feature routes.
-
-Current note:
-
-- The resume link points to `/resrume`, which appears to be a typo. The intended route is likely `/resume`, but that route does not currently exist.
-
-### 8.3 Onboarding
-
-Files:
-
-- `app/(main)/onboarding/page.jsx`
-- `app/(main)/onboarding/_components/onboarding-form.jsx`
-- `app/lib/schema.js`
-- `actions/user.js`
-- `app/data/industries.js`
-
-Purpose:
-
-Onboarding converts a newly authenticated user into a personalized career profile.
-
-Flow:
+All Gemini calls follow the same pattern:
 
 ```text
-User opens /onboarding
-  |
-  v
-getUserOnboardingStatus()
-  |
-  | if industry exists
-  v
-redirect('/dashboard')
-
-If not onboarded:
-  |
-  v
-Render OnboardingForm
-  |
-  v
-User selects industry and specialization
-  |
-  v
-React Hook Form + Zod validate and transform data
-  |
-  v
-updateUser(server action)
-  |
-  v
-Find current user by Clerk id
-  |
-  v
-Find or create IndustryInsight
-  |
-  v
-Update User profile
-  |
-  v
-Redirect to /dashboard
+Build prompt with user/industry context
+  → model.generateContent(prompt)
+  → response.text()
+  → strip ```json fences
+  → JSON.parse() (for structured outputs)
+  → validate/transform
+  → Prisma create/update
+  → return to UI
 ```
 
-Implementation details:
+File: `lib/gemini.js` — singleton model instance using `GEMINI_API_KEY` and `GEMINI_MODEL` (default: `gemini-2.5-flash-lite`).
 
-- `industries.js` provides industry and sub-industry options.
-- The selected industry and sub-industry are combined into one string:
+---
+
+## 5. Project Structure
 
 ```text
-{industry}-{normalized-subIndustry}
+SensAI/
+├── app/
+│   ├── layout.js                    # Root: ClerkProvider, ThemeProvider, Header, Toaster
+│   ├── page.js                      # Landing page (SSR)
+│   ├── globals.css                  # Tailwind + CSS variables
+│   ├── (auth)/                      # Clerk sign-in / sign-up
+│   │   ├── layout.js
+│   │   ├── sign-in/[[...sign-in]]/page.jsx
+│   │   └── sign-up/[[...sign-up]]/page.jsx
+│   ├── (main)/                      # Authenticated app shell
+│   │   ├── layout.jsx               # Container wrapper
+│   │   ├── onboarding/
+│   │   ├── dashboard/
+│   │   ├── interview/
+│   │   ├── resume/
+│   │   └── ai-cover-letter/
+│   ├── api/inngest/route.js         # Inngest webhook handler
+│   └── lib/
+│       ├── schema.js                # Zod schemas
+│       └── helper.js                # Markdown helpers
+├── actions/                         # Server Actions ("use server")
+│   ├── user.js
+│   ├── dashboard.js
+│   ├── interview.js
+│   ├── resume.js
+│   └── cover-letter.js
+├── components/
+│   ├── header.jsx                   # Nav + checkUser sync
+│   ├── hero.jsx                     # Landing hero (client)
+│   ├── theme-provider.jsx           # next-themes wrapper
+│   └── ui/                          # shadcn/Radix components
+├── data/                            # Static content (industries, FAQs, features)
+├── hooks/use-fetch.js               # Client async wrapper for server actions
+├── lib/
+│   ├── prisma.js                    # Prisma singleton
+│   ├── checkUser.js                 # Clerk ↔ DB sync
+│   ├── gemini.js                    # Gemini client
+│   ├── utils.js                     # cn() class merge
+│   └── inngest/
+│       ├── client.js
+│       └── function.js
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+└── middleware.js                    # Clerk route protection
 ```
 
-Example:
+---
+
+## 6. Database Architecture
+
+### 6.1 Entity Relationship Diagram
 
 ```text
-tech-software-development
+┌─────────────────────┐         ┌──────────────────────────┐
+│   IndustryInsight   │         │          User            │
+├─────────────────────┤         ├──────────────────────────┤
+│ id (cuid)           │◄────────│ industry (FK, unique key)│
+│ industry (unique)   │  1 : N  │ id (uuid)                │
+│ salaryRanges (Json[])│        │ clerkUserId (unique)     │
+│ growthRate          │         │ email (unique)           │
+│ demandLevel         │         │ name, imageUrl           │
+│ topSkills[]         │         │ bio, experience          │
+│ marketOutlook       │         │ skills[]                 │
+│ keyTrends[]         │         └───────────┬──────────────┘
+│ recommendedSkills[] │                     │
+│ lastUpdated         │         ┌───────────┼───────────────┐
+│ nextUpdate          │         │           │               │
+└─────────────────────┘         ▼           ▼               ▼
+                          ┌──────────┐ ┌──────────┐  ┌─────────────┐
+                          │Assessment│ │  Resume  │  │ CoverLetter │
+                          ├──────────┤ ├──────────┤  ├─────────────┤
+                          │ userId   │ │ userId   │  │ userId      │
+                          │ quizScore│ │ content  │  │ content     │
+                          │ questions│ │ atsScore?│  │ jobTitle    │
+                          │   (Json[])│ │ feedback?│  │ companyName │
+                          │ category │ └──────────┘  │ jobDescription│
+                          │improvement│  1:1 unique │ status      │
+                          │   Tip    │              └─────────────┘
+                          └──────────┘                   1 : N
+                               1 : N
 ```
 
-- `onboardingSchema` validates:
-  - industry
-  - subIndustry
-  - experience between 0 and 50
-  - optional bio with max length 500
-  - comma-separated skills transformed into a string array
-
-- `useFetch(updateUser)` wraps the async server action and exposes:
-  - `loading`
-  - `data`
-  - `error`
-  - `fn`
-
-- On success, the form shows a success toast, navigates to `/dashboard`, and refreshes the router.
-
-### 8.4 Industry Insights Generation
-
-Files:
-
-- `actions/dashboard.js`
-- `actions/user.js`
-- `app/(main)/dashboard/page.jsx`
-- `app/(main)/dashboard/_components/dashboard-view.jsx`
-
-Purpose:
-
-Industry insights give the user a personalized market overview based on their selected industry.
-
-AI prompt output contract:
-
-Gemini is asked to return only JSON in this shape:
-
-```json
-{
-  "salaryRanges": [
-    {
-      "role": "string",
-      "min": 0,
-      "max": 0,
-      "median": 0,
-      "location": "string"
-    }
-  ],
-  "growthRate": 0,
-  "demandLevel": "High",
-  "topSkills": ["skill1"],
-  "marketOutlook": "Positive",
-  "keyTrends": ["trend1"],
-  "recommendedSkills": ["skill1"]
-}
-```
-
-Implementation:
-
-1. `generateAIInsights(industry)` sends a structured prompt to Gemini.
-2. The response text is cleaned to remove possible Markdown code fences.
-3. The cleaned response is parsed with `JSON.parse`.
-4. `demandLevel` and `marketOutlook` are converted to uppercase to match Prisma enums.
-5. The result is stored in `IndustryInsight`.
-6. `nextUpdate` is set to seven days after generation.
-
-Connection to onboarding:
-
-- When `updateUser()` runs, it checks whether an `IndustryInsight` already exists for the selected industry.
-- If not, it generates one before updating the user profile.
-- This keeps the dashboard ready immediately after onboarding.
-
-Connection to dashboard:
-
-- `getIndustryInsights()` fetches the authenticated user with their related `industryInsight`.
-- If the insight is missing, it generates and stores one.
-- The dashboard receives the insight object as a prop.
-
-### 8.5 Dashboard
-
-Files:
-
-- `app/(main)/dashboard/page.jsx`
-- `app/(main)/dashboard/layout.js`
-- `app/(main)/dashboard/_components/dashboard-view.jsx`
-
-Purpose:
-
-The dashboard turns the `IndustryInsight` record into visual, interview-friendly career intelligence.
-
-Flow:
-
-```text
-/dashboard request
-  |
-  v
-getUserOnboardingStatus()
-  |
-  | if not onboarded
-  v
-redirect('/onboarding')
-  |
-  v
-getIndustryInsights()
-  |
-  v
-DashboardView(insights)
-```
-
-Dashboard sections:
-
-- Last updated badge.
-- Market outlook card with icon and next update distance.
-- Industry growth card with progress bar.
-- Demand level card with color indicator.
-- Top skills card with badges.
-- Salary ranges bar chart with min, median, and max salary.
-- Key industry trends list.
-- Recommended skills badges.
-
-Implementation details:
-
-- `date-fns` formats `lastUpdated` and relative `nextUpdate`.
-- `recharts` renders salary ranges as a responsive bar chart.
-- `lucide-react` icons change based on market outlook.
-- Demand level color is derived from enum value.
-
-### 8.6 Mock Interview Quiz
-
-Files:
-
-- `app/(main)/interview/mock/page.jsx`
-- `app/(main)/interview/_components/quiz.jsx`
-- `app/(main)/interview/_components/quiz-result.jsx`
-- `actions/interview.js`
-
-Purpose:
-
-The quiz feature generates technical interview questions personalized to the user's industry and skills.
-
-Flow:
-
-```text
-User opens /interview/mock
-  |
-  v
-Quiz component shows "Start Quiz"
-  |
-  v
-generatequiz(server action)
-  |
-  v
-Gemini generates 10 MCQs
-  |
-  v
-Client stores questions and selected answers
-  |
-  v
-User answers one question at a time
-  |
-  v
-Client calculates score
-  |
-  v
-saveQuizResult(questions, answers, score)
-  |
-  v
-Server builds question result objects
-  |
-  v
-Gemini optionally generates improvement tip
-  |
-  v
-Assessment row is saved
-```
-
-Question format:
-
-```json
-{
-  "question": "string",
-  "options": ["string", "string", "string", "string"],
-  "correctAnswer": "string",
-  "explanation": "string"
-}
-```
-
-Client-side implementation:
-
-- `currentQuestion` tracks quiz progress.
-- `answers` stores selected answers by question index.
-- `showExplanation` controls whether the current question's explanation is visible.
-- `calculateScore()` compares selected answers to `correctAnswer`.
-- `finishQuiz()` saves the result using a server action.
-
-Server-side implementation:
-
-- `generatequiz()` authenticates the user.
-- It loads the user's industry and skills.
-- It prompts Gemini for 10 multiple-choice technical questions.
-- It cleans and parses the JSON response.
-- `saveQuizResult()` creates a normalized result object for each question.
-- Wrong answers are used to generate a short improvement tip.
-- The final assessment is stored in PostgreSQL.
-
-Current note:
-
-- `quiz-result.jsx` is currently a placeholder component, so the saved result object is passed to it but not yet displayed in detail.
-- `/interview` itself is also a placeholder page; `/interview/mock` contains the active quiz implementation.
-
-### 8.7 Background Industry Refresh
-
-Files:
-
-- `lib/inngest/client.js`
-- `lib/inngest/functions.js`
-- `app/api/inngest/route.js`
-
-Purpose:
-
-Industry insight data should not become stale. Inngest is used to schedule a weekly regeneration job.
-
-Flow:
-
-```text
-Inngest cron: every Sunday at 00:00
-  |
-  v
-Fetch all IndustryInsight industries
-  |
-  v
-For each industry:
-    Generate fresh insights with Gemini
-    Parse JSON
-    Convert enums
-    Update IndustryInsight row
-```
-
-Benefits:
-
-- Keeps user dashboards fresh without requiring user interaction.
-- Moves long-running scheduled work outside the request-response path.
-- Allows step-level retries and observability through Inngest.
-
-Current note:
-
-- The update code uses `nextUpdated`, but the Prisma model field is `nextUpdate`. This should be corrected before relying on the scheduled job.
-- The `step.ai.wrap` callback currently calls `model.generateContent(p)` without returning the result. It should return the Gemini response so parsing works reliably.
-
-### 8.8 Resume and Cover Letter
-
-Files:
-
-- `prisma/schema.prisma`
-- `app/(main)/ai-cover-letter/page.jsx`
-- `app/(main)/ai-cover-letter/[id]/page.jsx`
-- Header link for resume and cover letter
-
-Current implementation:
-
-- Database models exist for `Resume` and `CoverLetter`.
-- Cover-letter pages are placeholders.
-- Resume route/actions are not implemented.
-
-Expected future design:
-
-- Resume generation would use user profile context: industry, experience, skills, and bio.
-- Cover-letter generation would combine user profile context with job title, company name, and job description.
-- Generated content would be stored in PostgreSQL for later viewing and editing.
-
-## 9. Data Flow Summary
-
-### New User Flow
-
-```text
-User signs in with Clerk
-  |
-  v
-Header calls checkUser()
-  |
-  v
-User row is created if it does not exist
-  |
-  v
-User visits /dashboard
-  |
-  v
-No industry found
-  |
-  v
-Redirect to /onboarding
-  |
-  v
-User completes career profile
-  |
-  v
-IndustryInsight is found or generated
-  |
-  v
-User row is updated
-  |
-  v
-Dashboard shows personalized insights
-```
-
-### Dashboard Data Flow
-
-```text
-Dashboard page
-  |
-  v
-Server action authenticates Clerk user
-  |
-  v
-Prisma fetches User + IndustryInsight
-  |
-  v
-Missing insight triggers Gemini generation
-  |
-  v
-Insight is stored in PostgreSQL
-  |
-  v
-DashboardView renders charts and cards
-```
-
-### Quiz Data Flow
-
-```text
-Quiz client component
-  |
-  v
-generatequiz()
-  |
-  v
-Gemini returns MCQ JSON
-  |
-  v
-User answers questions in browser
-  |
-  v
-Client calculates percentage score
-  |
-  v
-saveQuizResult()
-  |
-  v
-Assessment is created in PostgreSQL
-```
-
-## 10. Important Implementation Patterns
-
-### Server Actions as Business Logic
-
-The app uses server actions instead of separate REST endpoints for most business operations:
-
-- `updateUser`
-- `getUserOnboardingStatus`
-- `getIndustryInsights`
-- `generatequiz`
-- `saveQuizResult`
-
-This keeps business logic close to the app and avoids manually creating API routes for internal mutations.
-
-### Prisma Client Singleton
+### 6.2 Model Details
+
+#### User
+Central profile linked to Clerk. Created automatically on first visit via `checkUser()`.
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `clerkUserId` | String (unique) | Links to Clerk identity |
+| `industry` | String? | Combined key: `{industry}-{sub-industry}` e.g. `tech-software-development` |
+| `skills` | String[] | Postgres array — used in quiz & cover letter prompts |
+| `experience` | Int? | Years — used in cover letter generation |
+| `bio` | String? | Professional background — used in cover letters |
+
+#### IndustryInsight
+**Shared across users** in the same industry. When User A and User B both pick "tech-software-development", they read the same insight row. This avoids regenerating AI data per user.
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `salaryRanges` | Json[] | `{ role, min, max, median, location }` per role |
+| `growthRate` | Float | Industry growth percentage |
+| `demandLevel` | String | "High" / "Medium" / "Low" |
+| `marketOutlook` | String | "Positive" / "Neutral" / "Negative" |
+| `topSkills`, `keyTrends`, `recommendedSkills` | String[] | Market intelligence |
+| `nextUpdate` | DateTime | When Inngest should refresh |
+
+#### Assessment
+Stores completed mock interview results.
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `questions` | Json[] | `{ question, answer, userAnswer, isCorrect, explanation }` |
+| `quizScore` | Float | Percentage 0–100 |
+| `improvementTip` | String? | Gemini-generated tip from wrong answers |
+
+#### Resume
+One resume per user (`userId` unique). Content stored as Markdown.
+
+#### CoverLetter
+Many per user. Includes job metadata and generated Markdown content.
+
+### 6.3 Prisma Client Singleton
 
 File: `lib/prisma.js`
 
-The Prisma client is cached on `globalThis` in development. This prevents multiple Prisma clients from being created during hot reloads, which can otherwise exhaust database connections.
+```javascript
+export const db = globalThis.prisma || new PrismaClient();
+if (process.env.NODE_ENV !== "production") globalThis.prisma = db;
+```
 
-### Shared Async Hook
+Prevents connection exhaustion during Next.js hot reload in development.
 
-File: `hooks/use-fetch.js`
+### 6.4 Neon + Prisma Setup
 
-`useFetch` centralizes client-side async state:
+- `DATABASE_URL` in `.env` points to Neon Postgres connection string
+- Migrations in `prisma/migrations/` version the schema
+- `postinstall` script runs `prisma generate` automatically
 
-- starts loading
-- clears previous error
-- runs callback
-- stores response data
-- stores error
-- shows toast error
-- stops loading
+---
 
-This is used by onboarding and quiz flows to call server actions from client components.
+## 7. Authentication & Authorization (Clerk)
 
-### AI JSON Contract
+### 7.1 Clerk Configuration
 
-Both insight generation and quiz generation rely on strict prompt instructions that ask Gemini to return only JSON. The app then removes Markdown fences and parses the result.
+| Env Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Client-side Clerk |
+| `CLERK_SECRET_KEY` | Server-side Clerk |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | `/onboarding` |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | `/onboarding` |
 
-This works well for rapid development, but production hardening should include:
+After sign-in/sign-up, Clerk redirects to `/onboarding`.
 
-- schema validation of AI responses
-- retry on invalid JSON
-- better error handling for malformed model output
-- safer prompt boundaries
+### 7.2 Route Protection (Middleware)
 
-## 11. Security and Access Control
+File: `middleware.js`
 
-Current security design:
+Protected routes (require signed-in user):
+- `/dashboard`, `/onboarding`, `/interview`, `/resume`, `/ai-cover-letter`
 
-- Clerk manages authentication.
-- Server actions call `auth()` before accessing protected data.
-- User records are queried by `clerkUserId`, not by client-provided user id.
-- Prisma relations enforce ownership between users and assessments, resumes, and cover letters.
+```javascript
+const isProtectedRoute = createRouteMatcher([
+  "/dashboard(.*)", "/resume(.*)", "/interview(.*)",
+  "/ai-cover-letter(.*)", "/onboarding(.*)",
+]);
+```
 
-Important interview point:
+If `!userId` on a protected route → `redirectToSignIn()`.
 
-The client never sends a trusted user id for protected operations. The server derives identity from the Clerk session, then loads the matching database user.
+### 7.3 Authorization in Server Actions
 
-Recommended improvements:
+Every server action follows this pattern:
 
-- Add route middleware to protect all `(main)` routes consistently.
-- Add authorization checks for future resume and cover-letter detail pages.
-- Validate all AI-generated JSON with Zod before inserting into the database.
-- Add rate limiting for AI-heavy actions such as quiz and insight generation.
+```javascript
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
 
-## 12. Scalability Considerations
+const user = await db.user.findUnique({ where: { clerkUserId: userId } });
+if (!user) throw new Error("User not found");
+```
 
-The current design has good early-stage scalability because:
+**Important:** The client never sends a trusted user ID. Identity always comes from the Clerk session on the server.
 
-- Industry insights are shared per industry instead of regenerated per user.
-- Background refresh is separated from page requests with Inngest.
-- Dashboard reads are simple relational queries.
-- AI generation happens only when insight data is missing or when the quiz starts.
+### 7.4 Clerk ↔ Database Sync Flow
 
-Potential bottlenecks:
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Clerk
+    participant H as Header (Server)
+    participant DB as PostgreSQL
 
-- AI API latency during onboarding if a new industry insight must be generated.
-- Invalid AI JSON can break the request unless validated and retried.
-- Large numbers of industries could make the weekly refresh job slow if processed sequentially.
-- `Assessment.questions` as JSON is flexible, but harder to query analytically than normalized question rows.
+    U->>C: Sign in / Sign up
+    C->>U: Session cookie set
+    U->>H: Visit any page
+    H->>C: currentUser()
+    C-->>H: clerkUserId, email, name
+    H->>DB: findUnique({ clerkUserId })
+    alt User not in DB
+        H->>DB: create({ clerkUserId, email, name, imageUrl })
+    end
+    DB-->>H: User row
+    H-->>U: Render page with nav
+```
 
-Possible improvements:
+---
 
-- Generate industry insights asynchronously and show a loading state.
-- Cache common industries.
-- Add background queue for quiz generation.
-- Add indexes or normalized tables for analytics-heavy assessment reports.
-- Process Inngest refreshes with fan-out jobs per industry.
+## 8. Next.js: SSR vs CSR in This Project
 
-## 13. Error Handling
+Next.js App Router uses **React Server Components (RSC)** by default. Components are Server Components unless marked with `"use client"`.
 
-Current approach:
+### 8.1 Server-Side Rendering (SSR) — Server Components
 
-- Server actions throw errors for unauthenticated users and missing user records.
-- Client components use `useFetch` to catch errors and display Sonner toasts.
-- AI parsing errors are caught in quiz generation and rethrown as user-friendly errors.
-- Improvement tip generation failure does not block assessment saving.
+These run **only on the server**. They can call Prisma, Clerk `auth()`, and server actions directly. No JavaScript bundle sent for their logic.
 
-Recommended production improvements:
+| File | What It Does (SSR) |
+| --- | --- |
+| `app/page.js` | Landing page — static sections, no client state |
+| `components/header.jsx` | Calls `checkUser()`, renders Clerk SignedIn/SignedOut |
+| `app/(main)/dashboard/page.jsx` | Fetches onboarding status + insights, redirects if needed |
+| `app/(main)/onboarding/page.jsx` | Checks onboarded state, redirects to dashboard |
+| `app/(main)/interview/page.jsx` | Fetches all assessments from DB |
+| `app/(main)/resume/page.jsx` | Fetches saved resume content |
+| `app/(main)/ai-cover-letter/page.jsx` | Fetches cover letter list |
+| `app/(main)/ai-cover-letter/[id]/page.jsx` | Fetches single cover letter by ID |
 
-- Add structured logging.
-- Add monitoring for Gemini failures and malformed responses.
-- Add fallback UI for dashboard insight generation failures.
-- Add retries for transient AI/API errors.
+**Example — Dashboard SSR:**
 
-## 14. Environment Variables
+```javascript
+// app/(main)/dashboard/page.jsx — Server Component
+export default async function DashboardPage() {
+  const { isOnboarded } = await getUserOnboardingStatus();
+  if (!isOnboarded) redirect("/onboarding");
 
-The project requires environment variables similar to:
+  const insights = await getIndustryInsights(); // DB + maybe Gemini
+  return <DashboardView insights={insights} />;
+}
+```
+
+**Benefits in SensAI:**
+- Insights and assessments fetched before HTML reaches browser (faster first paint)
+- Database credentials never exposed to client
+- SEO for landing page
+
+### 8.2 Client-Side Rendering (CSR) — Client Components
+
+Marked with `"use client"`. Run in the browser. Handle forms, state, event handlers, and call server actions via hooks.
+
+| File | Why Client? |
+| --- | --- |
+| `onboarding-form.jsx` | React Hook Form, submit handler, router navigation |
+| `quiz.jsx` | Question state, answers, progress, async quiz generation |
+| `dashboard-view.jsx` | Recharts needs browser DOM for charts |
+| `resume-builder.jsx` | Form state, tabs, MD editor, PDF download |
+| `cover-letter-generator.jsx` | Form submit → generate action |
+| `entry-form.jsx` | Dynamic entries, AI improve button |
+| `performace-chart.jsx` | Recharts line chart |
+| `components/hero.jsx` | Scroll animation with useRef/useEffect |
+| `theme-provider.jsx` | next-themes requires client context |
+
+**Example — Quiz CSR calling Server Action:**
+
+```javascript
+"use client";
+// quiz.jsx
+const { fn: generateQuizFn, data: quizData } = useFetch(generateQuiz);
+// User clicks "Start Quiz" → generateQuizFn() → Server Action on server → returns questions
+```
+
+### 8.3 Hybrid Pattern (Most Common in SensAI)
+
+```text
+Server Component (page.jsx)
+  │
+  ├── Fetches data from DB on server
+  ├── Passes data as props ↓
+  │
+  └── Client Component (view/form)
+        ├── Receives initial data as props (SSR hydration)
+        ├── Manages interactive state locally (CSR)
+        └── Calls Server Actions for mutations (CSR → Server)
+```
+
+| Page | Server Part | Client Part |
+| --- | --- | --- |
+| Dashboard | Fetch insights | Render charts/cards |
+| Interview | Fetch assessments | Stats cards, chart, quiz list |
+| Resume | Fetch saved content | Builder form, AI improve, PDF |
+| Mock Quiz | Page shell only | Entire quiz flow |
+| Onboarding | Redirect logic | Form submission |
+
+### 8.4 Server Actions as the API Layer
+
+Instead of REST endpoints, SensAI uses **Server Actions** (`"use server"`) for all mutations and some reads initiated from the client:
+
+- `updateUser`, `generateQuiz`, `saveQuizResult`, `saveResume`, `improveWithAI`, `generateCoverLetter`
+
+Client components import these directly — Next.js serializes the call over HTTP automatically.
+
+---
+
+## 9. Gemini AI Integration
+
+### 9.1 Setup
+
+File: `lib/gemini.js`
+
+```javascript
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+export const model = genAI.getGenerativeModel({
+  model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite"
+});
+```
+
+### 9.2 All Gemini Touchpoints
+
+| Feature | Action / Job | Input Context | Output | Persisted? |
+| --- | --- | --- | --- | --- |
+| **Industry Insights** | `generateAIInsights()` | Industry string | JSON: salary, growth, trends, skills | Yes → `IndustryInsight` |
+| **Onboarding** | `updateUser()` | Industry (triggers insight if new) | Same as above | Yes |
+| **Dashboard fallback** | `getIndustryInsights()` | User's industry | Same as above | Yes if missing |
+| **Weekly refresh** | Inngest cron job | Each industry in DB | Same as above | Yes (update) |
+| **Mock Quiz** | `generateQuiz()` | User industry + skills | 10 MCQs JSON | No (session only) |
+| **Quiz feedback** | `saveQuizResult()` | Wrong answers + industry | Improvement tip text | Yes → `Assessment.improvementTip` |
+| **Resume improve** | `improveWithAI()` | Entry description + industry | Improved paragraph | No (returned to form) |
+| **Cover letter** | `generateCoverLetter()` | User profile + job details | Markdown letter | Yes → `CoverLetter` |
+
+### 9.3 Prompt Strategy
+
+All structured outputs use **strict JSON prompts**:
+
+```text
+Analyze the {industry} industry...
+Return ONLY the following JSON format without any additional notes:
+{ "salaryRanges": [...], "growthRate": number, ... }
+IMPORTANT: Return ONLY the JSON. No markdown formatting.
+```
+
+Post-processing always strips markdown fences:
+
+```javascript
+const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+const data = JSON.parse(cleanedText);
+```
+
+### 9.4 Personalization Chain
+
+```text
+User Profile (industry, skills, experience, bio)
+        │
+        ├──► Industry Insights  → market data for their industry
+        ├──► Quiz Questions     → technical MCQs for industry + skills
+        ├──► Improvement Tips   → based on wrong quiz answers
+        ├──► Resume Improve     → industry-aware bullet rewrites
+        └──► Cover Letter       → full letter using profile + job posting
+```
+
+---
+
+## 10. Inngest Background Jobs
+
+### 10.1 Purpose
+
+Industry insights should stay fresh without users triggering regeneration. Inngest runs a **weekly cron** to refresh all industry records.
+
+### 10.2 Components
+
+| File | Role |
+| --- | --- |
+| `lib/inngest/client.js` | Inngest app client (`id: "career-coach"`) |
+| `lib/inngest/function.js` | `generateIndustryInsights` cron function |
+| `app/api/inngest/route.js` | Next.js API route — `serve()` exposes GET/POST/PUT |
+
+### 10.3 Cron Schedule
+
+```javascript
+{ cron: "0 0 * * 0" }  // Every Sunday at midnight
+```
+
+### 10.4 Job Flow
+
+```text
+Inngest triggers cron
+  → step.run("Fetch industries") → all IndustryInsight.industry values
+  → for each industry:
+      → build Gemini prompt
+      → step.ai.wrap("gemini", model.generateContent, prompt)
+      → parse JSON
+      → step.run("Update insights") → db.industryInsight.update
+      → set lastUpdated = now, nextUpdate = now + 7 days
+```
+
+### 10.5 Why Inngest Here?
+
+- **Decouples** long AI calls from user HTTP requests
+- **Retries** failed steps automatically
+- **Observability** in Inngest dashboard
+- **Scales** as industry count grows (can fan-out per industry)
+
+---
+
+## 11. Feature Walkthrough (Step by Step)
+
+### 11.1 Landing Page (`/`)
+
+**Type:** Server Component  
+**Files:** `app/page.js`, `components/hero.jsx`, `data/features.js`, `data/faqs.js`, etc.
+
+1. User visits `/` — no auth required
+2. Server renders hero, feature cards, stats, how-it-works, testimonials, FAQ accordion, CTA
+3. CTA links to `/dashboard` (middleware will redirect to sign-in if not authenticated)
+4. Header shows Sign In button (SignedOut) or nav links (SignedIn)
+
+---
+
+### 11.2 Authentication
+
+**Files:** `app/(auth)/sign-in/...`, `app/(auth)/sign-up/...`, `middleware.js`
+
+1. User clicks Sign In → `/sign-in`
+2. Clerk UI handles credentials/OAuth
+3. On success → redirect to `/onboarding` (Clerk env config)
+4. Session cookie set; middleware allows protected routes
+
+---
+
+### 11.3 Onboarding (`/onboarding`)
+
+**Server:** `onboarding/page.jsx`  
+**Client:** `onboarding-form.jsx`  
+**Action:** `updateUser()` in `actions/user.js`
+
+**Step-by-step:**
+
+1. Server calls `checkUser()` — ensures DB user exists
+2. Server calls `getUserOnboardingStatus()` — if already onboarded → redirect `/dashboard`
+3. Client renders form with industry dropdown (from `data/industries.js`)
+4. User selects industry → sub-industry options appear
+5. User fills experience, skills (comma-separated), bio
+6. Zod validates via `onboardingSchema` — skills transformed to array, experience to int
+7. Industry formatted: `tech` + `Software Development` → `tech-software-development`
+8. `updateUser()` server action:
+   - Starts Prisma **transaction**
+   - Checks if `IndustryInsight` exists for that industry
+   - If not → calls `generateAIInsights()` → Gemini → creates insight row
+   - Updates User with industry, experience, skills, bio
+9. Client redirects to `/dashboard`
+
+---
+
+### 11.4 Industry Insights Dashboard (`/dashboard`)
+
+**Server:** `dashboard/page.jsx`  
+**Client:** `dashboard-view.jsx`  
+**Actions:** `getIndustryInsights()`, `getUserOnboardingStatus()`
+
+**Step-by-step:**
+
+1. Check onboarded — else redirect onboarding
+2. `getIndustryInsights()`:
+   - Load user + `industryInsight` relation
+   - If insight missing → generate via Gemini + create row
+   - Return insight object
+3. `DashboardView` renders:
+   - Market outlook card (icon by Positive/Neutral/Negative)
+   - Growth rate with progress bar
+   - Demand level with color bar
+   - Top skills badges
+   - Salary ranges Recharts bar chart (min/median/max in $K)
+   - Key trends list
+   - Recommended skills badges
+   - Last updated / next update dates
+
+---
+
+### 11.5 Interview Preparation (`/interview`)
+
+**Server:** `interview/page.jsx`  
+**Client:** `stats-cards.jsx`, `performace-chart.jsx`, `quiz-list.jsx`  
+**Action:** `getAssessments()`
+
+**Step-by-step:**
+
+1. Server fetches all user's `Assessment` records ordered by date
+2. **StatsCards** — average score, total questions practiced, latest score
+3. **PerformanceChart** — line chart of scores over time (client-side Recharts)
+4. **QuizList** — history of past quizzes with links to review
+5. User navigates to `/interview/mock` for new quiz
+
+---
+
+### 11.6 Mock Interview Quiz (`/interview/mock`)
+
+**Client:** `quiz.jsx`, `quiz-result.jsx`  
+**Actions:** `generateQuiz()`, `saveQuizResult()`
+
+**Step-by-step:**
+
+1. Quiz shows "Start Quiz" card
+2. User clicks Start → `generateQuiz()`:
+   - Loads user industry + skills
+   - Gemini generates 10 MCQs with 4 options each
+   - Returns questions array (not persisted yet)
+3. User answers one question at a time
+4. Optional "Show Explanation" per question
+5. On last question → `finishQuiz()`:
+   - Client calculates score percentage
+   - `saveQuizResult(questions, answers, score)`:
+     - Builds result objects per question
+     - If wrong answers → Gemini generates improvement tip
+     - Creates `Assessment` row in DB
+6. `QuizResult` shows score, tip, question-by-question review
+7. "Start New Quiz" regenerates fresh questions
+
+---
+
+### 11.7 Resume Builder (`/resume`)
+
+**Server:** `resume/page.jsx` — loads existing content  
+**Client:** `resume-builder.jsx`, `entry-form.jsx`  
+**Actions:** `saveResume()`, `improveWithAI()`, `getResume()`
+
+**Step-by-step:**
+
+1. Server loads saved resume Markdown (if any)
+2. User fills contact info, summary, skills
+3. Adds experience/education/project entries via `EntryForm`
+4. Each entry can use **"Improve with AI"** → `improveWithAI({ current, type })`:
+   - Gemini rewrites description for user's industry
+   - Updated text fills the textarea
+5. Live preview tab converts form → Markdown via `entriesToMarkdown()`
+6. **Save** → `saveResume(content)` → upsert `Resume` row
+7. **Download PDF** → html2pdf.js converts preview HTML to PDF
+
+---
+
+### 11.8 Cover Letter (`/ai-cover-letter`)
+
+**Routes:**
+- `/ai-cover-letter` — list all letters
+- `/ai-cover-letter/new` — create form
+- `/ai-cover-letter/[id]` — view generated letter
+
+**Actions:** `generateCoverLetter()`, `getCoverLetters()`, `getCoverLetter()`, `deleteCoverLetter()`
+
+**Step-by-step (create):**
+
+1. User fills company name, job title, job description
+2. Zod validates via `coverLetterSchema`
+3. `generateCoverLetter(data)`:
+   - Loads user profile (industry, experience, skills, bio)
+   - Gemini writes tailored Markdown cover letter
+   - Creates `CoverLetter` row with status `"completed"`
+4. Redirect to `/ai-cover-letter/[id]` for preview
+5. List page shows all past letters with delete option
+
+---
+
+## 12. Feature Interconnections
+
+The user profile is the **hub**. Every feature reads from or writes to it.
+
+```text
+                    ┌─────────────────┐
+                    │   Clerk Auth    │
+                    └────────┬────────┘
+                             │ checkUser()
+                             ▼
+                    ┌─────────────────┐
+                    │   User Profile  │
+                    │ industry        │
+                    │ skills          │
+                    │ experience      │
+                    │ bio             │
+                    └────────┬────────┘
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+         ▼                   ▼                   ▼
+┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+│ IndustryInsight│  │  Assessment    │  │ Resume         │
+│ (shared/industry)│ │  (quiz history)│  │ (1 per user)   │
+└───────┬────────┘  └───────┬────────┘  └────────────────┘
+        │                   │
+        ▼                   ▼
+   Dashboard            Interview Page
+   (read insights)      (stats + chart)
+        │                   │
+        │                   ▼
+        │              Mock Quiz
+        │              (uses skills)
+        │
+        ▼
+   Inngest Cron
+   (refresh insights)
+
+         User Profile ──► CoverLetter (many)
+                    └──► improveWithAI (resume entries)
+```
+
+### Connection Matrix
+
+| From → To | Relationship |
+| --- | --- |
+| Onboarding → User | Writes profile fields |
+| Onboarding → IndustryInsight | Creates insight if industry is new |
+| User → IndustryInsight | FK via `User.industry` = `IndustryInsight.industry` |
+| User → Assessment | One user, many quiz attempts |
+| User → Resume | One-to-one |
+| User → CoverLetter | One-to-many |
+| User profile → Gemini (all features) | Industry/skills/bio/experience in prompts |
+| IndustryInsight → Dashboard | Primary data source for charts/cards |
+| Assessment → Interview page | Stats, chart, history list |
+| Inngest → IndustryInsight | Weekly refresh keeps dashboard current |
+
+---
+
+## 13. Sequence Diagrams
+
+### 13.1 New User — Sign Up to Dashboard
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Clerk
+    participant Middleware
+    participant Onboarding as Onboarding Page
+    participant Action as updateUser()
+    participant Gemini
+    participant DB as Neon DB
+    participant Dashboard
+
+    User->>Clerk: Sign up
+    Clerk->>User: Redirect /onboarding
+    User->>Middleware: GET /onboarding
+    Middleware->>Clerk: Verify session ✓
+    Onboarding->>DB: checkUser() — create User row
+    User->>Onboarding: Fill profile form
+    Onboarding->>Action: updateUser(data)
+    Action->>DB: Transaction start
+    Action->>DB: IndustryInsight exists?
+    alt New industry
+        Action->>Gemini: generateAIInsights(industry)
+        Gemini-->>Action: JSON insights
+        Action->>DB: Create IndustryInsight
+    end
+    Action->>DB: Update User profile
+    Action-->>Onboarding: Success
+    Onboarding->>Dashboard: router.push(/dashboard)
+    Dashboard->>DB: getIndustryInsights()
+    DB-->>Dashboard: IndustryInsight data
+    Dashboard-->>User: Render charts & cards
+```
+
+### 13.2 Mock Interview Quiz
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Quiz as Quiz (Client)
+    participant Gen as generateQuiz()
+    participant Save as saveQuizResult()
+    participant Gemini
+    participant DB as Neon DB
+
+    User->>Quiz: Click "Start Quiz"
+    Quiz->>Gen: generateQuiz()
+    Gen->>DB: Get user industry + skills
+    Gen->>Gemini: Prompt: 10 MCQs
+    Gemini-->>Gen: JSON questions
+    Gen-->>Quiz: questions[]
+
+    loop Each question
+        User->>Quiz: Select answer
+        Quiz->>Quiz: Store in answers[]
+    end
+
+    User->>Quiz: Finish Quiz
+    Quiz->>Quiz: calculateScore()
+    Quiz->>Save: saveQuizResult(questions, answers, score)
+
+    alt Has wrong answers
+        Save->>Gemini: Improvement tip prompt
+        Gemini-->>Save: Tip text
+    end
+
+    Save->>DB: Create Assessment
+    Save-->>Quiz: Assessment result
+    Quiz-->>User: Show QuizResult
+```
+
+### 13.3 Cover Letter Generation
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Form as CoverLetterGenerator
+    participant Action as generateCoverLetter()
+    participant DB as Neon DB
+    participant Gemini
+
+    User->>Form: Enter company, title, job description
+    Form->>Action: generateCoverLetter(data)
+    Action->>DB: Get User (industry, skills, bio, experience)
+    Action->>Gemini: Prompt with profile + job details
+    Gemini-->>Action: Markdown cover letter
+    Action->>DB: Create CoverLetter row
+    Action-->>Form: coverLetter { id, content }
+    Form->>User: Redirect /ai-cover-letter/[id]
+```
+
+### 13.4 Resume AI Improve
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Entry as EntryForm (Client)
+    participant Action as improveWithAI()
+    participant DB as Neon DB
+    participant Gemini
+
+    User->>Entry: Type experience description
+    User->>Entry: Click "Improve with AI"
+    Entry->>Action: improveWithAI({ current, type })
+    Action->>DB: Get user industry
+    Action->>Gemini: Rewrite prompt
+    Gemini-->>Action: Improved paragraph
+    Action-->>Entry: improvedContent
+    Entry->>Entry: setValue("description", improved)
+    Entry-->>User: Updated textarea
+```
+
+### 13.5 Weekly Industry Insight Refresh (Inngest)
+
+```mermaid
+sequenceDiagram
+    participant Inngest
+    participant Job as generateIndustryInsights
+    participant DB as Neon DB
+    participant Gemini
+
+    Inngest->>Job: Cron: Sunday 00:00
+    Job->>DB: findMany industries
+    DB-->>Job: [{ industry: "tech-..." }, ...]
+
+    loop Each industry
+        Job->>Gemini: generateAIInsights prompt
+        Gemini-->>Job: JSON insights
+        Job->>DB: Update IndustryInsight
+        Note over Job,DB: lastUpdated = now, nextUpdate = +7 days
+    end
+```
+
+### 13.6 Server Action Call from Client Component
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Client as Client Component
+    participant Next as Next.js Server
+    participant Action as Server Action
+    participant Clerk
+    participant DB
+
+    Browser->>Client: User action (submit/click)
+    Client->>Next: POST (serialized action)
+    Next->>Action: Execute on server
+    Action->>Clerk: auth() → userId
+    Action->>DB: Query/mutate
+    Action-->>Next: Return value
+    Next-->>Client: Serialized response
+    Client->>Browser: Update UI + toast
+```
+
+---
+
+## 14. Server Actions Reference
+
+| Action | File | Auth | AI | DB Operation |
+| --- | --- | --- | --- | --- |
+| `updateUser` | `user.js` | ✓ | ✓ (new industry) | Transaction: insight + user update |
+| `getUserOnboardingStatus` | `user.js` | ✓ | — | Read user.industry |
+| `generateAIInsights` | `dashboard.js` | — | ✓ | — (helper, no auth) |
+| `getIndustryInsights` | `dashboard.js` | ✓ | ✓ (fallback) | Read/create insight |
+| `generateQuiz` | `interview.js` | ✓ | ✓ | Read user profile |
+| `saveQuizResult` | `interview.js` | ✓ | ✓ (tips) | Create assessment |
+| `getAssessments` | `interview.js` | ✓ | — | Read assessments |
+| `saveResume` | `resume.js` | ✓ | — | Upsert resume |
+| `getResume` | `resume.js` | ✓ | — | Read resume |
+| `improveWithAI` | `resume.js` | ✓ | ✓ | Read user industry |
+| `generateCoverLetter` | `cover-letter.js` | ✓ | ✓ | Create cover letter |
+| `getCoverLetters` | `cover-letter.js` | ✓ | — | Read all |
+| `getCoverLetter` | `cover-letter.js` | ✓ | — | Read one |
+| `deleteCoverLetter` | `cover-letter.js` | ✓ | — | Delete one |
+
+---
+
+## 15. Styling & UI Components
+
+### 15.1 Tailwind CSS
+
+- Config: `tailwind.config.mjs`
+- Global styles: `app/globals.css` — CSS variables for theme colors, gradient utilities (`.gradient-title`, `.gradient`)
+- Dark theme forced via `ThemeProvider` with `forcedTheme="dark"`
+
+### 15.2 Radix UI + shadcn/ui
+
+Components in `components/ui/` follow the shadcn pattern:
+- Built on Radix primitives for accessibility (keyboard nav, ARIA)
+- Styled with Tailwind via `class-variance-authority` and `tailwind-merge`
+- Config in `components.json`
+
+| Component | Used For |
+| --- | --- |
+| `Button`, `Input`, `Textarea`, `Label` | Forms |
+| `Card` | Dashboard cards, quiz, onboarding |
+| `Select` | Industry/sub-industry dropdowns |
+| `RadioGroup` | Quiz answer options |
+| `Tabs` | Resume edit/preview |
+| `Dialog`, `AlertDialog` | Confirmations |
+| `DropdownMenu` | Growth Tools nav |
+| `Accordion` | Landing page FAQ |
+| `Badge`, `Progress` | Skills tags, scores |
+| `Sonner` | Toast notifications |
+
+### 15.3 Theme Provider
+
+File: `components/theme-provider.jsx`
+
+```jsx
+export function ThemeProvider({ children, ...props }) {
+  return <NextThemesProvider {...props}>{children}</NextThemesProvider>;
+}
+```
+
+Wraps the app in `app/layout.js` for dark/light class switching (currently forced to dark).
+
+---
+
+## 16. Environment Variables & Local Setup
+
+### 16.1 Required `.env`
 
 ```env
-DATABASE_URL="postgresql://..."
-GEMINI_API_KEY="..."
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="..."
-CLERK_SECRET_KEY="..."
+# Neon PostgreSQL
+DATABASE_URL="postgresql://user:pass@ep-xxx.region.aws.neon.tech/neondb?sslmode=require"
+
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/onboarding
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/onboarding
+
+# Google Gemini
+GEMINI_API_KEY=your_api_key
+GEMINI_MODEL=gemini-2.5-flash-lite   # optional, has default
 ```
 
-Depending on Clerk setup, sign-in/sign-up URL variables may also be configured.
-
-## 15. How to Run Locally
-
-Install dependencies:
+### 16.2 Run Locally
 
 ```bash
+# Install dependencies (runs prisma generate via postinstall)
 npm install
-```
 
-Generate Prisma client:
-
-```bash
-npx prisma generate
-```
-
-Apply database migrations:
-
-```bash
+# Apply database migrations to Neon
 npx prisma migrate dev
-```
 
-Start the development server:
-
-```bash
+# Start dev server (Turbopack)
 npm run dev
 ```
 
-Other scripts:
+App runs at `http://localhost:3000`.
+
+For Inngest in local dev, run the Inngest dev server separately:
 
 ```bash
-npm run build
-npm run start
-npm run lint
+npx inngest-cli@latest dev
 ```
 
-## 16. Current Known Gaps
+### 16.3 Scripts
 
-These are useful to know for an interview because they show awareness of the real system state:
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Development with Turbopack |
+| `npm run build` | Production build |
+| `npm run start` | Production server |
+| `npm run lint` | ESLint |
+| `npx prisma studio` | Visual DB browser |
 
-- `/interview` page is a placeholder.
-- `quiz-result.jsx` is a placeholder and does not yet render score, answers, or improvement tips.
-- `/ai-cover-letter` and `/ai-cover-letter/[id]` are placeholders.
-- Resume schema exists, but resume UI/actions are missing.
-- Header resume link has a typo: `/resrume`.
-- Onboarding page imports `redirect` from `next/dist/server/api-utils`; it should use `next/navigation`.
-- Inngest refresh function should update `nextUpdate`, not `nextUpdated`.
-- Inngest AI wrapper should return the Gemini result.
-- AI JSON responses should be validated before database writes.
+---
 
-## 17. Interview-Ready Explanation
+## 17. End-to-End User Journey
 
-SensAi is a full-stack AI career coach built on Next.js App Router. The app uses Clerk for authentication and Prisma with PostgreSQL for persistent user and career data. When a user signs in, the global header synchronizes the Clerk identity into the local `User` table. The user then completes onboarding by selecting an industry, specialization, experience, skills, and bio. That profile becomes the core personalization context for the rest of the app.
+```text
+1. DISCOVER
+   User lands on / → reads features, FAQs, testimonials
 
-The dashboard feature is powered by an `IndustryInsight` model. When a user selects an industry, the system checks whether insights already exist for that industry. If not, it calls Gemini with a strict JSON prompt asking for salary ranges, demand level, growth rate, trends, top skills, recommended skills, and market outlook. The response is parsed, converted into Prisma-compatible enum values, stored in PostgreSQL, and shown in a dashboard with cards, badges, progress bars, and Recharts salary visualizations.
+2. SIGN UP
+   Clicks CTA → Clerk sign-up → redirected to /onboarding
 
-The interview feature uses the same user profile context. The client starts a quiz, calls a server action, and Gemini generates 10 multiple-choice technical questions for the user's industry and skills. The client tracks answers and calculates the score. On completion, the server stores an `Assessment` record with question-level results. If the user answered questions incorrectly, Gemini generates a short improvement tip based on those knowledge gaps.
+3. SYNC
+   Header checkUser() creates User row in Neon (clerkUserId, email, name)
 
-The architecture keeps sensitive work on the server. Client components never decide user identity; server actions use Clerk's `auth()` and query the user by `clerkUserId`. Prisma handles relational persistence, and Inngest is introduced for scheduled weekly refreshes of industry insights so data can stay updated without blocking user requests.
+4. ONBOARD
+   Selects Technology → Software Development
+   Enters 5 years experience, "React, Node.js, Python", bio
+   Submits → Gemini generates tech-software-development insights
+   User profile saved → redirect /dashboard
 
-The project is designed around a practical separation of concerns: Clerk owns identity, Prisma owns persistence, server actions own business logic, Gemini owns content generation, Inngest owns scheduled background workflows, and React components own user experience.
+5. EXPLORE INSIGHTS
+   Dashboard shows salary chart, growth 8.2%, demand High,
+   top skills, trends, recommended skills
+
+6. PRACTICE INTERVIEW
+   Goes to /interview → sees empty stats
+   /interview/mock → Start Quiz → 10 AI questions
+   Scores 70% → gets improvement tip → saved to Assessment
+   Returns to /interview → sees stats, performance chart, history
+
+7. BUILD RESUME
+   /resume → adds experience entries
+   Uses "Improve with AI" on bullet points
+   Saves → Markdown stored in Resume table
+   Downloads PDF
+
+8. APPLY FOR JOB
+   /ai-cover-letter/new → enters Google, Senior Engineer, job description
+   Gemini generates personalized letter
+   Views at /ai-cover-letter/[id]
+
+9. ONGOING
+   Every Sunday, Inngest refreshes industry insights
+   User returns to dashboard for updated market data
+   Takes more quizzes → performance chart trends upward
+```
+
+---
+
+## 18. Security Model
+
+| Concern | How SensAI Handles It |
+| --- | --- |
+| Authentication | Clerk sessions; middleware on protected routes |
+| Authorization | Server actions use `auth()` — never trust client user ID |
+| Data isolation | Queries scoped by `clerkUserId` → internal `user.id` |
+| Cover letter access | `getCoverLetter(id)` filters by `userId` |
+| API keys | `GEMINI_API_KEY`, `CLERK_SECRET_KEY`, `DATABASE_URL` server-only |
+| SQL injection | Prisma parameterized queries |
+
+---
+
+## 19. Scalability & Design Decisions
+
+### Smart Decisions
+
+1. **Shared IndustryInsight** — One AI generation serves all users in the same industry
+2. **Server Actions** — No separate REST API layer; simpler full-stack Next.js
+3. **Prisma singleton** — Safe dev hot reload without connection leaks
+4. **Inngest cron** — Insight refresh off the request path
+5. **JSON columns for quiz questions** — Flexible schema for variable question counts
+
+### Potential Improvements
+
+- Validate Gemini JSON responses with Zod before DB writes
+- Async insight generation during onboarding with loading UI
+- Rate limiting on AI-heavy actions
+- Fan-out Inngest jobs per industry for parallel refresh
+- Normalize assessment questions for analytics queries
+
+---
+
+## Quick Reference: Where Does X Live?
+
+| Question | Answer |
+| --- | --- |
+| Where is auth checked? | `middleware.js` + every server action |
+| Where is user created in DB? | `lib/checkUser.js` (called from Header) |
+| Where is Gemini configured? | `lib/gemini.js` |
+| Where are prompts defined? | Inside each action in `actions/` + `lib/inngest/function.js` |
+| How do client forms call the server? | Server Actions via `useFetch` hook |
+| Where is the DB schema? | `prisma/schema.prisma` |
+| Where is route protection? | `middleware.js` |
+| Where is the cron job? | `lib/inngest/function.js` |
+| What connects all features? | `User` profile (industry, skills, experience, bio) |
+
+---
+
+*This document reflects the current SensAI codebase. Use it for onboarding, interviews, and end-to-end understanding of the system.*
